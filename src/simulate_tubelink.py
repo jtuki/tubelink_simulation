@@ -31,24 +31,6 @@ POWER_CONSUMPTION_TX_UPLINK     = AMP_TX * DURATION_UPLINK
 gl_totalRunTime = 3600*10*1000
 gl_curRunTime = 0           # 当前的仿真运行时间 (ms)
 
-#####################################
-# 仿真场景的配置参数
-gl_avgEvent = 300*1000      # ms
-gl_avgEmerg = 900*1000
-gl_avgDown  = 1800*1000
-gl_bcnDown  = 32            # 消息下发类型的节点每隔多少信标周期检查一次下行消息
-gl_nodesUpNum   = 200
-gl_nodesDownNum = 500
-
-gl_nodeInitSpan = 600*1000  # 节点在仿真时间的前面这段时间内完成初始化
-
-gl_batteryCapacity = 2500   # mAh
-
-gl_bcnClassesNum = 2        # 信标周期分组的数量
-gl_maxTxTimes = 3           # 每个上行消息的最大传输次数（最多重传次数+1）
-gl_maxDownlinkMsg = 10      # 每个信标周期里最多传输的下行消息数量
-#####################################
-
 from random import randint
 import numpy as np
 
@@ -303,10 +285,11 @@ class NodeDown(object):
         self.txDuration += DURATION_UPLINK
         self.powerConsumption += POWER_CONSUMPTION_TRACK_BCN + POWER_CONSUMPTION_RX_DOWNLINK
 
-def GatewaySchedulerRun():
+def GatewaySchedulerRun(check_variables):
     r"""调度器。负责定时发出信标；将可以发出去的下行消息，发出去；接收上行消息。
     """
     global gl_curRunTime
+    gl_curRunTime = 0
     
     bcnSeqID = -1   # 初始化根据lollipop序列方式，从负数-127开始，这里假设初始就已经是-1
     bcnClassID = 0  # 信标周期分组，使用0做为起始值，参见 @gl_bcnClassesNum
@@ -630,34 +613,125 @@ def GatewaySchedulerRun():
     for n, num in downMsgFailList:
         avgDownMsgFailNum += num
     avgDownMsgFailNum /= len(downMsgFailList)
-                                   
-    logger.info("avgPowerNodeUp,      %f" % avgPowerNodeUp)
-    logger.info("avgPowerNodeDown,    %f" % avgPowerNodeDown)
+
+    if 'power' in check_variables:                                   
+        logger.info("avgAmpNodeUp,      %f" % (avgPowerNodeUp / gl_totalRunTime))
+        logger.info("avgAmpNodeDown,    %f" % (avgPowerNodeDown / gl_totalRunTime))
     
-    logger.info("avgLifeNodeUp,       %f" % avgLifeNodeUp)
-    logger.info("avgLifeNodeDown,     %f" % avgLifeNodeDown)
+    # logger.info("avgLifeNodeUp,   %f" % avgLifeNodeUp)
+    # logger.info("avgLifeNodeDown, %f" % avgLifeNodeDown)
     
-    logger.info("avgEventDelay,       %f" % avgEventDelay)
-    logger.info("avgEmergDelay,       %f" % avgEmergDelay)
+    if 'upDelay' in check_variables:
+        logger.info("avgEventDelay,     %f" % avgEventDelay)
+        logger.info("avgEmergDelay,     %f" % avgEmergDelay)
                                       
-    logger.info("avgEventTxNum,       %f" % avgEventTxNum)
-    logger.info("avgEmergTxNum,       %f" % avgEmergTxNum)
+    # logger.info("avgEventTxNum,       %f" % avgEventTxNum)
+    # logger.info("avgEmergTxNum,       %f" % avgEmergTxNum)
                                       
-    logger.info("avgEventMsgNum,      %f" % avgEventMsgNum)
-    logger.info("avgEventMsgFailed,   %f" % avgEventMsgFailed)
-    logger.info("avgEventOkRatio,     %%%f" % ((1-(avgEventMsgFailed / avgEventMsgNum))*100))
+    # logger.info("avgEventMsgNum,      %f" % avgEventMsgNum)
+    # logger.info("avgEventMsgFailed,   %f" % avgEventMsgFailed)
                                       
-    logger.info("avgEmergMsgNum,      %f" % avgEmergMsgNum)
-    logger.info("avgEmergMsgFailed,   %f" % avgEmergMsgFailed)
-    logger.info("avgEmergOkRatio,     %%%f" % ((1-(avgEmergMsgFailed / avgEmergMsgNum))*100))
+    # logger.info("avgEmergMsgNum,      %f" % avgEmergMsgNum)
+    # logger.info("avgEmergMsgFailed,   %f" % avgEmergMsgFailed)
+
+    if 'upOk' in check_variables:
+        logger.info("avgEventOkRatio,   %f" % (1-(avgEventMsgFailed / avgEventMsgNum)))
+        logger.info("avgEmergOkRatio,   %f" % (1-(avgEmergMsgFailed / avgEmergMsgNum)))
     
-    logger.info("avgDownDelay,        %f" % avgDownDelay)
-    logger.info("avgDownTxNum,        %f" % avgDownTxNum)
-    logger.info("avgDownMsgNum,       %f" % avgDownMsgNum)
-    logger.info("avgDownMsgFailNum,   %f" % avgDownMsgFailNum)
+    if 'downDelay' in check_variables:
+        logger.info("avgDownDelay,      %f" % avgDownDelay)
+        
+    # logger.info("avgDownTxNum,        %f" % avgDownTxNum)
+    # logger.info("avgDownMsgNum,       %f" % avgDownMsgNum)
+    # logger.info("avgDownMsgFailNum,   %f" % avgDownMsgFailNum)
     
+    if 'downOk' in check_variables:
+        logger.info("avgDownOkRatio,    %f" % (1-(avgDownMsgFailNum / avgDownMsgNum)))
     
 if __name__ == '__main__':
-    logger.info("============= simulation start =============")
-    GatewaySchedulerRun()
+    r"""['power', 'upDelay', 'upOk', 'downDelay', 'downOk']
+    """
+    #####################################
+    # 仿真的基本配置参数
+    gl_avgEvent = 300*1000      # ms
+    gl_avgEmerg = 900*1000
+    gl_avgDown  = 900*1000
+    gl_nodeInitSpan = 600*1000  # 节点在仿真时间的前面这段时间内完成初始化
+    gl_batteryCapacity = 2500   # mAh
+    gl_maxTxTimes = 3           # 每个上行消息的最大传输次数（最多重传次数+1）
+    gl_maxDownlinkMsg = 10      # 每个信标周期里最多传输的下行消息数量
+    gl_bcnClassesNum = 2        # 信标周期分组的数量
+    
+    # variables
+    gl_bcnDown  = 32            # 消息下发类型的节点每隔多少信标周期检查一次下行消息
+    gl_nodesUpNum   = 200
+    gl_nodesDownNum = 100
+    #####################################
+    
+    #####################################
+    S1 = True
+    if S1:
+        # 仿真场景1的配置参数 - 更改上行节点数量，验证对上行重传功耗开销、上行丢包率、上行延迟的影响
+        gl_nodesUpNum   = None      # [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
+    
+        for n in [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]:
+            gl_nodesUpNum = n
+            logger.info("=== S1 === gl_nodesUpNum, %d" % int(gl_nodesUpNum))
+            GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
+            
+        gl_nodesUpNum = 200     # 还原默认配置
+    #####################################
+        
+    #####################################
+    S2 = True
+    if S2:
+        # 仿真场景2的配置参数  - 更改下行节点数量，验证对上行段（变短）的丢包率的影响
+        gl_nodesUpNum   = 100
+        gl_nodesDownNum = None      # [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+        
+        for n in [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]:
+            gl_nodesDownNum = n
+            logger.info("=== S2 === gl_nodesDownNum, %d" % int(gl_nodesDownNum))
+            GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
+            
+        # 还原默认值
+        gl_nodesUpNum   = 200
+        gl_nodesDownNum = 100
+    #####################################
+    
+    #####################################
+    S3 = True
+    if S3:
+        # 仿真场景3的配置参数 - 更改bcnDown参数，验证对下行节点功耗开销、以及下行延迟的影响
+        gl_nodesUpNum   = 50
+        gl_nodesDownNum = 700
+        gl_bcnDown = None   # [4, 8, 16, 32, 64]
+        
+        for n in [4, 8, 16, 32, 64]:
+            gl_bcnDown = n
+            logger.info("=== S3 === gl_bcnDown, %d" % int(gl_bcnDown))
+            GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
+            
+        # 还原默认值
+        gl_bcnDown = 32
+        gl_nodesUpNum   = 200
+        gl_nodesDownNum = 100
+    #####################################
+    
+    #####################################
+    S4 = True
+    if S4:
+        # 仿真场景4的配置参数 - 压缩初始化的随机性，查看信标周期分组机制（削峰填谷）对上行丢包率的影响
+        gl_nodeInitSpan = 60*1000
+        gl_bcnClassesNum = None  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        
+        for n in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+            gl_bcnClassesNum = n
+            logger.info("=== S4 === gl_bcnClassesNum, %d" % int(gl_bcnClassesNum))
+            GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
+            
+        # 还原默认值
+        gl_nodeInitSpan = 600*1000  # 节点在仿真时间的前面这段时间内完成初始化
+        gl_bcnClassesNum = 2        # 信标周期分组的数量
+    #####################################
     
