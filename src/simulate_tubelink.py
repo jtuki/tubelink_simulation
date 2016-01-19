@@ -5,13 +5,15 @@ r"""针对TubeLink做一些仿真验证。
 """
 
 gl_bcnDuration = 8000       # 信标周期的长度
-gl_packedAckDelay = 2
+gl_packedAckDelay = 2       # 延迟查收ack的信标周期间隔数量
+gl_evtCollisionDelay = 3    # 冲突之后的上行事件消息在 [1, gl_evtCollisionDelay] 个信标周期后再次发送
 gl_totalSlots = 128         # 一个信标周期里所有的时间槽数量
 gl_slotDuration = gl_bcnDuration/gl_totalSlots 
 
 gl_bcnSlots = 6        # 信标段所占据的时间槽数量    
 gl_dFrameSlots = 6     # 每个下行消息占据的时间槽数量
 gl_uFrameSlots = 4     # 每个上行消息占据的时间槽数量
+gl_subFrameSlots = 3   # 每个gl_uFrameSlots前面的部分再次细分的时间槽
 
 # 功耗开销参数
 # 电流
@@ -121,7 +123,10 @@ class NodeMsg(object):
             self.discard = True
         else:
             # 模拟在delayed信标周期里查看packedACK没有找到的场景
-            self.genTime.append(t + gl_bcnDuration*gl_packedAckDelay)
+            if self.type == 'event':
+                self.genTime.append(t + gl_bcnDuration*(gl_packedAckDelay + randint(1, gl_evtCollisionDelay)))
+            else:
+                self.genTime.append(t + gl_bcnDuration*gl_packedAckDelay)
         
     def tx_ok(self, t):
         assert self.tryTx == True and self.discard == False
@@ -147,8 +152,12 @@ class NodeUp(object):
         gl_nodeID_node_mapping[self.id] = self
         self.avg = (avgEvent, avgEmerg)     # 上行消息间的时间间隔（泊松分布期望值）
         
-        self.eventMsgGenTime = gen_possion_msg_sequence(self.avg[0], gl_totalRunTime-self.randStart)
-        self.emergMsgGenTime = gen_possion_msg_sequence(self.avg[1], gl_totalRunTime-self.randStart)
+        self.eventMsgGenTime = gen_possion_msg_sequence(self.avg[0], 
+                                            gl_totalRunTime - self.randStart
+                                            - gl_bcnDuration*(gl_packedAckDelay+gl_evtCollisionDelay))
+        self.emergMsgGenTime = gen_possion_msg_sequence(self.avg[1],
+                                            gl_totalRunTime - self.randStart
+                                            - gl_bcnDuration*(gl_packedAckDelay+gl_evtCollisionDelay))
         
         self.msgList = []   # 所有的上行消息对象
         self.msgNoIterList = [] # 所有不再参与后续遍历搜索的消息对象
@@ -366,25 +375,39 @@ def GatewaySchedulerRun(check_variables):
                 for msg in uplink_msg:
                     assert isinstance(msg, NodeMsg)
                     # remainSlots减去gl_uFrameSlots的原因是给最后一段保留一个上行时间，避免和下个信标冲突
-                    slotList.append((randint(1, remainSlots-gl_uFrameSlots), msg))
+                    slot1 = int(randint(1, remainSlots-gl_uFrameSlots+1) / gl_uFrameSlots) * gl_uFrameSlots
+                    slot2 = randint(1, gl_subFrameSlots)
+                    slotList.append((slot1, msg, slot2))
                 slotList.sort(key=lambda x:x[0])
                 
                 slotOk = []     # 成功发送的slot
                 slotFailed = [] # 没有被收到的slot
+                
                 i = 0
                 while i < len(slotList):
-                    slotOk.append(slotList[i])
-                    curSlotID = slotList[i][0]
+                    frames = []
+                    frames.append(slotList[i])
+                    s = frames[-1][0]
                     i += 1
-                    while i < len(slotList) and (slotList[i][0] - curSlotID) < gl_uFrameSlots:
-                        slotFailed.append(slotList[i])
+                    while i < len(slotList) and slotList[i][0] == s:
+                        frames.append(slotList[i])
                         i += 1
+                    if len(frames) > 1:
+                        frames.sort(key=lambda x:x[2])
+                        if frames[0][2] != frames[1][2]:
+                            slotOk.append(frames[0])
+                        else:
+                            slotFailed.append(frames[0])
+                        slotFailed += frames[1:]    # 每个slot里只有第一个占据了不和别人重复的sub时间槽的才可能发送成功
+                    else:
+                        slotOk.append(frames[0])
+                        
                 assert len(slotOk) + len(slotFailed) == len(slotList)
                 
-                for slot, msg in slotOk:
+                for slot, msg, _ in slotOk:
                     t = gl_curRunTime + slot*gl_slotDuration
                     msg.tx_ok(t)
-                for slot, msg in slotFailed:
+                for slot, msg, _ in slotFailed:
                     t = gl_curRunTime + slot*gl_slotDuration
                     msg.tx_fail(t)
                     
@@ -614,16 +637,28 @@ def GatewaySchedulerRun(check_variables):
         avgDownMsgFailNum += num
     avgDownMsgFailNum /= len(downMsgFailList)
 
-    if 'power' in check_variables:                                   
-        logger.info("avgAmpNodeUp,      %f" % (avgPowerNodeUp / gl_totalRunTime))
-        logger.info("avgAmpNodeDown,    %f" % (avgPowerNodeDown / gl_totalRunTime))
+    logger.info("%10s, %10s, %10s, %10s, "
+                "%10s, %10s, %10s, %10s, " %
+                ("ampUp", "ampDown", "evDelay", "emDelay",
+                 "evOk", "emOk", "downDelay", "downOk"))
+    
+    logger.info("%10.2f, %10.2f, %10.2f, %10.2f"
+                "%10.4f, %10.4f, %10.2f, %10.4f" %
+                ((avgPowerNodeUp / gl_totalRunTime)*1000, (avgPowerNodeDown / gl_totalRunTime)*1000, # power (uA)
+                 avgEventDelay / 1000, avgEmergDelay / 1000,
+                 1-(avgEventMsgFailed / avgEventMsgNum), 1-(avgEmergMsgFailed / avgEmergMsgNum),
+                 avgDownDelay / 1000, 1-(avgDownMsgFailNum / avgDownMsgNum)))
+    
+    # power                                   
+    # logger.info("avgAmpNodeUp,      %f" % (avgPowerNodeUp / gl_totalRunTime))
+    # logger.info("avgAmpNodeDown,    %f" % (avgPowerNodeDown / gl_totalRunTime))
     
     # logger.info("avgLifeNodeUp,   %f" % avgLifeNodeUp)
     # logger.info("avgLifeNodeDown, %f" % avgLifeNodeDown)
     
-    if 'upDelay' in check_variables:
-        logger.info("avgEventDelay,     %f" % avgEventDelay)
-        logger.info("avgEmergDelay,     %f" % avgEmergDelay)
+    # upDelay
+    # logger.info("avgEventDelay,     %f" % avgEventDelay)
+    # logger.info("avgEmergDelay,     %f" % avgEmergDelay)
                                       
     # logger.info("avgEventTxNum,       %f" % avgEventTxNum)
     # logger.info("avgEmergTxNum,       %f" % avgEmergTxNum)
@@ -634,19 +669,19 @@ def GatewaySchedulerRun(check_variables):
     # logger.info("avgEmergMsgNum,      %f" % avgEmergMsgNum)
     # logger.info("avgEmergMsgFailed,   %f" % avgEmergMsgFailed)
 
-    if 'upOk' in check_variables:
-        logger.info("avgEventOkRatio,   %f" % (1-(avgEventMsgFailed / avgEventMsgNum)))
-        logger.info("avgEmergOkRatio,   %f" % (1-(avgEmergMsgFailed / avgEmergMsgNum)))
+    # upOk
+    # logger.info("avgEventOkRatio,   %f" % (1-(avgEventMsgFailed / avgEventMsgNum)))
+    # logger.info("avgEmergOkRatio,   %f" % (1-(avgEmergMsgFailed / avgEmergMsgNum)))
     
-    if 'downDelay' in check_variables:
-        logger.info("avgDownDelay,      %f" % avgDownDelay)
+    # downDelay
+    # logger.info("avgDownDelay,      %f" % avgDownDelay)
         
     # logger.info("avgDownTxNum,        %f" % avgDownTxNum)
     # logger.info("avgDownMsgNum,       %f" % avgDownMsgNum)
     # logger.info("avgDownMsgFailNum,   %f" % avgDownMsgFailNum)
     
-    if 'downOk' in check_variables:
-        logger.info("avgDownOkRatio,    %f" % (1-(avgDownMsgFailNum / avgDownMsgNum)))
+    # downOk
+    # logger.info("avgDownOkRatio,    %f" % (1-(avgDownMsgFailNum / avgDownMsgNum)))
     
 if __name__ == '__main__':
     r"""['power', 'upDelay', 'upOk', 'downDelay', 'downOk']
