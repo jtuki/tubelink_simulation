@@ -62,9 +62,12 @@ def gen_possion_msg_sequence(avg, duration):
             break
     return s if len(s) > 0 else [int(randint(1, duration))] # 至少1个
     
-def gen_saddr():
+def gen_saddr(reinit=False):
     r"""针对一个网关下的所有节点，分配不重复的短地址
     """
+    if reinit:
+        gen_saddr.saddrList = []
+    
     ok = False
     saddr = None
     try:
@@ -75,12 +78,27 @@ def gen_saddr():
                 gen_saddr.saddrList.append(saddr)
     except:
         gen_saddr.saddrList = []
+        gen_saddr.saddrList.append(saddr)
     return saddr
 
 def time_prefix():
     r"""显示当前的仿真时间做为日志前缀
     """
     return "%12s:" % str(gl_curRunTime)
+
+def init_simulation_state():
+    global gl_nodeID_node_mapping
+    global gl_vbcn_node_mapping
+    
+    gen_saddr(reinit=True)
+    
+    gl_nodeID_node_mapping = {}
+    gl_vbcn_node_mapping = {}
+    
+    
+###############################################################################
+# TubeLink simulation
+###############################################################################
 
 class NodeMsg(object):
     r"""传感上报类型节点的消息。
@@ -334,6 +352,8 @@ def GatewaySchedulerRun(check_variables):
     """
     global gl_curRunTime
     global gl_virtualBcnSeqID
+    
+    init_simulation_state()
     
     gl_curRunTime = 0
     
