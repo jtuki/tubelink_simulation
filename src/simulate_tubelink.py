@@ -25,9 +25,11 @@ AMP_SLEEP = 0.005
 DURATION_BCN = 500  # ms
 DURATION_UPLINK = 200
 DURATION_DOWNLINK = 300 # 留了一些给guard interval
+DURATION_ACK    = 80
 # 单次收发功耗开销
 POWER_CONSUMPTION_TRACK_BCN     = AMP_RX * DURATION_BCN         # mA*ms
 POWER_CONSUMPTION_RX_DOWNLINK   = AMP_RX * DURATION_DOWNLINK
+POWER_CUNSUMPTION_ACK           = AMP_TX * DURATION_ACK
 POWER_CONSUMPTION_TX_UPLINK     = AMP_TX * DURATION_UPLINK
 
 # 总共的运行时间(ms)
@@ -299,7 +301,10 @@ class NodeDown(object):
         
         self.rxDuration += DURATION_BCN + DURATION_DOWNLINK
         self.txDuration += DURATION_UPLINK
-        self.powerConsumption += POWER_CONSUMPTION_TRACK_BCN + POWER_CONSUMPTION_RX_DOWNLINK
+        # 接收下行消息+ack的开销
+        self.powerConsumption += (POWER_CONSUMPTION_TRACK_BCN + 
+                                  POWER_CONSUMPTION_RX_DOWNLINK + 
+                                  POWER_CUNSUMPTION_ACK)
 
 def GatewaySchedulerRun(check_variables):
     r"""调度器。负责定时发出信标；将可以发出去的下行消息，发出去；接收上行消息。
@@ -705,7 +710,7 @@ if __name__ == '__main__':
     #####################################
     
     #####################################
-    S1 = False
+    S1 = True
     if S1:
         # 仿真场景1的配置参数 - 更改上行节点数量，验证对上行重传功耗开销、上行丢包率、上行延迟的影响
         gl_nodesUpNum   = None      # [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
@@ -721,7 +726,7 @@ if __name__ == '__main__':
     #####################################
         
     #####################################
-    S2 = False
+    S2 = True
     if S2:
         # 仿真场景2的配置参数  - 更改下行节点数量，验证对上行段（变短）的丢包率的影响
         gl_nodesUpNum   = 300
@@ -741,7 +746,7 @@ if __name__ == '__main__':
     #####################################
     
     #####################################
-    S3 = False
+    S3 = True
     if S3:
         # 仿真场景3的配置参数 - 更改bcnDown参数，验证对下行节点功耗开销、以及下行延迟的影响
         gl_nodesUpNum   = 50
