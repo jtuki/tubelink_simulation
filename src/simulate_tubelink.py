@@ -35,6 +35,7 @@ POWER_CONSUMPTION_TX_UPLINK     = AMP_TX * DURATION_UPLINK
 # 总共的运行时间(ms)
 gl_totalRunTime = 3600*10*1000
 gl_curRunTime = 0           # 当前的仿真运行时间 (ms)
+gl_virtualBcnSeqID = -1     # 不断持续递增的、专门用于仿真的信标序列号
 
 from random import randint
 import numpy as np
@@ -44,6 +45,9 @@ from simple_logger import get_logger
 logger = get_logger()
 
 gl_nodeID_node_mapping = {}     # nodeID => NodeUp或者NodeDown节点
+
+gl_vbcn_node_mapping = {}       # gl_virtualBcnSeqID => [nodeID ...]
+                                # 这个信标周期里可能有上行的节点，加速仿真速度
 
 def gen_possion_msg_sequence(avg, duration):
     r"""返回一个泊松分布的序列，表示各个消息的创建时间。
@@ -68,6 +72,7 @@ def gen_saddr():
             saddr = randint(0x0001, 0xFFFA)
             if saddr not in gen_saddr.saddrList:
                 ok = True
+                gen_saddr.saddrList.append(saddr)
     except:
         gen_saddr.saddrList = []
     return saddr
@@ -85,7 +90,9 @@ class NodeMsg(object):
         self.nodeID = id        # 节点的ID编号
         self.type = type        # 'event' | 'emerg'
         self.genTime = [gen]    # 消息产生的时间，每次tx_fail时会认为是再次生成一个msg
+        self.updateGenTimeHook()
         self.txTime = []        # 尝试发送的时间
+        
 
         self.tryTx = True       # 是否尝试发送
         self.discard = False    # @gl_maxTxTimes次发送依然失败后，丢失消息，并将discard置True 
@@ -95,17 +102,29 @@ class NodeMsg(object):
         self.rxDuration = 0     # 用于统计节点rx的时长
         self.txDuration = 0     # 用于统计节点tx的时长
         
+    def updateGenTimeHook(self):
+        # 更新了消息的genTime之后，更新 gl_vbcn_node_mapping 映射里的内容
+        vbcn = int(self.genTime[-1] / gl_bcnDuration) + 1
+        if vbcn not in gl_vbcn_node_mapping:
+            gl_vbcn_node_mapping[vbcn] = []
+        if self.nodeID not in gl_vbcn_node_mapping[vbcn]:
+            gl_vbcn_node_mapping[vbcn].append(self.nodeID)
+    
     def can_tx(self, bcnClassID):
         r"""检查是否可以在当前的信标周期下发送。
         """
+        # 当前信标周期的起始时间
+        periodStart = gl_virtualBcnSeqID*gl_bcnDuration
+        
         if (self.tryTx and not self.discard
-            and self.genTime[-1] <= gl_curRunTime 
-            and gl_curRunTime - self.genTime[-1] < gl_bcnDuration):
+            and self.genTime[-1] <= periodStart 
+            and periodStart - self.genTime[-1] < gl_bcnDuration):
             # 检查信标周期分组的约束
             if self.nodeID % gl_bcnClassesNum == bcnClassID or self.type == 'emerg':
                 return True
             else:
                 self.genTime.append(self.genTime[-1] + gl_bcnDuration)
+                self.updateGenTimeHook()
                 return False
         elif self.tryTx == False:
             return None
@@ -130,10 +149,12 @@ class NodeMsg(object):
                 self.genTime.append(t + gl_bcnDuration*(gl_packedAckDelay 
                                                         + randint(1, gl_evtCollisionDelay)
                                                         + pow(2, len(self.txTime))))
+                self.updateGenTimeHook()
             else:
                 self.genTime.append(t + gl_bcnDuration*(gl_packedAckDelay 
                                                         + randint(1, gl_emergCollisionDelay)
                                                         + pow(2, len(self.txTime))))
+                self.updateGenTimeHook()
         
     def tx_ok(self, t):
         assert self.tryTx == True and self.discard == False
@@ -148,6 +169,7 @@ class NodeMsg(object):
         r"""仅仅是往后延迟一个周期，比如当前的周期里节点有两个消息要发送时，就要选择一个往后延迟。
         """
         self.genTime.append(self.genTime[-1] + gl_bcnDuration)
+        self.updateGenTimeHook()
         
 class NodeUp(object):
     r"""传感上报类型的节点。
@@ -214,10 +236,11 @@ class DownMsg(object):
         self.txTime = None          # 当发送成功时，将此时间设置成发送时间
         
     def can_tx(self):
+        periodStart = gl_virtualBcnSeqID*gl_bcnDuration
         if (self.txTime is None 
             and len(self.genTime) < gl_maxDownTimes  # 最多延后 gl_maxDownTimes 次数
-            and self.genTime[-1] <= gl_curRunTime
-            and gl_curRunTime - self.genTime[-1] < self.bcnDown*gl_bcnDuration):
+            and self.genTime[-1] <= periodStart
+            and periodStart - self.genTime[-1] < self.bcnDown*gl_bcnDuration):
             return True
         else:
             return False
@@ -310,9 +333,12 @@ def GatewaySchedulerRun(check_variables):
     r"""调度器。负责定时发出信标；将可以发出去的下行消息，发出去；接收上行消息。
     """
     global gl_curRunTime
+    global gl_virtualBcnSeqID
+    
     gl_curRunTime = 0
     
     bcnSeqID = -1   # 初始化根据lollipop序列方式，从负数-127开始，这里假设初始就已经是-1
+    gl_virtualBcnSeqID = -1
     bcnClassID = 0  # 信标周期分组，使用0做为起始值，参见 @gl_bcnClassesNum
     
     nodesUp   = []
@@ -328,6 +354,7 @@ def GatewaySchedulerRun(check_variables):
         if gl_curRunTime % gl_bcnDuration == 0:
             # 处理当前的信标周期
             bcnSeqID = (bcnSeqID+1) % 128
+            gl_virtualBcnSeqID += 1
             bcnClassID = (bcnClassID+1) % gl_bcnClassesNum
             
             logger.debug(time_prefix() + "START bcnPeriod %d bcnClassID %d" % (bcnSeqID, bcnClassID))
@@ -370,12 +397,14 @@ def GatewaySchedulerRun(check_variables):
             # 检查所有的上行节点
             uplink_msg = []
             
-            for upNode in nodesUp:
-                assert isinstance(upNode, NodeUp)
-                msg = upNode.get_msg_can_tx(bcnClassID)
-                if msg:
-                    uplink_msg.append(msg)
-                    
+            if gl_virtualBcnSeqID in gl_vbcn_node_mapping: # 否则当前没有节点有消息发送
+                for id in gl_vbcn_node_mapping[gl_virtualBcnSeqID]:
+                    upNode = gl_nodeID_node_mapping[id]
+                    assert isinstance(upNode, NodeUp)
+                    msg = upNode.get_msg_can_tx(bcnClassID)
+                    if msg:
+                        uplink_msg.append(msg)
+            
             logger.debug(time_prefix() + "bcnPeriod %7d: len(uplink_msg): %d" 
                          % (bcnSeqID, len(uplink_msg)))
                     
