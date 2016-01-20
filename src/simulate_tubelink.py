@@ -734,12 +734,12 @@ if __name__ == '__main__':
     
     # variables
     gl_bcnDown  = 32            # 消息下发类型的节点每隔多少信标周期检查一次下行消息
-    gl_nodesUpNum   = 200
-    gl_nodesDownNum = 200
+    gl_nodesUpNum   = 300
+    gl_nodesDownNum = 300
     #####################################
     
     #####################################
-    S1 = True
+    S1 = False
     if S1:
         # 仿真场景1的配置参数 - 更改上行节点数量，验证对上行重传功耗开销、上行丢包率、上行延迟的影响
         gl_nodesUpNum   = None      # [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
@@ -751,14 +751,13 @@ if __name__ == '__main__':
             gl_nodesUpNum = n
             GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
             
-        gl_nodesUpNum = 200     # 还原默认配置
+        gl_nodesUpNum = 300     # 还原默认配置
     #####################################
         
     #####################################
-    S2 = True
+    S2 = False
     if S2:
         # 仿真场景2的配置参数  - 更改下行节点数量，验证对上行段（变短）的丢包率的影响
-        gl_nodesUpNum   = 300
         gl_bcnDown  = 8
         gl_nodesDownNum = None      # [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
         
@@ -770,16 +769,15 @@ if __name__ == '__main__':
             GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
             
         # 还原默认值
-        gl_nodesUpNum   = 200
-        gl_nodesDownNum = 200
+        gl_nodesDownNum = 300
+        gl_bcnDown  = 32
     #####################################
     
     #####################################
     S3 = True
     if S3:
         # 仿真场景3的配置参数 - 更改bcnDown参数，验证对下行节点功耗开销、以及下行延迟的影响
-        gl_nodesUpNum   = 50
-        gl_nodesDownNum = 700
+        gl_nodesDownNum = 500
         gl_bcnDown = None   # [4, 8, 16, 32, 64]
         
         logger.info("=== S3 === gl_bcnDown")
@@ -791,8 +789,7 @@ if __name__ == '__main__':
             
         # 还原默认值
         gl_bcnDown = 32
-        gl_nodesUpNum   = 200
-        gl_nodesDownNum = 200
+        gl_nodesDownNum = 300
     #####################################
     
     #####################################
@@ -800,7 +797,6 @@ if __name__ == '__main__':
     if S4:
         # 仿真场景4的配置参数 - 压缩初始化的随机性，查看信标周期分组机制（削峰填谷）对上行丢包率的影响
         gl_nodeInitSpan = 10*1000
-        gl_nodesUpNum   = 200
         gl_bcnClassesNum = None  # [1, 3, 5, 7, 9, 11, 13, 15]
         
         logger.info("=== S4 === gl_bcnClassesNum")
@@ -812,7 +808,6 @@ if __name__ == '__main__':
             
         # 还原默认值
         gl_nodeInitSpan = 600*1000  # 节点在仿真时间的前面这段时间内完成初始化
-        gl_nodesUpNum   = 200
         gl_bcnClassesNum = 2        # 信标周期分组的数量
     #####################################
     
