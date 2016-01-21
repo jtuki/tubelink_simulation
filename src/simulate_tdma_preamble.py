@@ -29,7 +29,7 @@ POWER_CONSUMPTION_CAD_NO_PREAMBLE   = AMP_RX * DURATION_CAD_NO_PERAMBLE     # CA
 POWER_CONSUMPTION_CAD_PREAMBLE_SUFFIX = AMP_RX * DURATION_CAD_HAS_PREAMBLE_SUFFIX
 
 # 总共的运行时间(ms)
-gl_totalRunTime = 3600*10*1000
+gl_totalRunTime = 3600*20*1000
 gl_curRunTime = 0           # 当前的仿真运行时间 (ms)
 
 gl_nodeID_node_mapping = {}     # nodeID => NodeUp或者NodeDown节点
@@ -121,6 +121,7 @@ class NodeMsg(object):
     def __init__(self, id, t):
         self.nodeID = id
         self.genTime = t    # 假设在这个网络里不存在重传的问题，由于TDMA的指定时间槽内不存在冲突
+        self.ttl = gl_upMsgLiveTime
         self.txTime = None  # 一旦发送之后，txTime被置成发送的时间
         self.powerConsumption = 0    # 本仿真中，一个上行节点的功耗开销，等于其所有上行消息的功耗开销总和
         self.txDuration = 0
@@ -170,7 +171,7 @@ class NodeUp(object):
         idx = 0
         for msg in self.msgList:
             assert isinstance(msg, NodeMsg)
-            if msg.genTime < before:
+            if msg.genTime < before and (before-msg.genTime) <= msg.ttl:
                 m.append((msg, idx))
                 if len(m) >= gl_maxUpPerSlot:
                     break
@@ -289,7 +290,7 @@ class DownMsg(object):
 
     def tx(self, t):
         assert self.txTime is None
-        self.txTime = t
+        self.txTime = t + gl_longPreambleDuration + DURATION_DOWNLINK   # 这里再加上空中传输时间
 
 def finish_all_downlink_nodes_init_hook():
     global gl_allDownlinkMsg
@@ -314,7 +315,7 @@ class NodeDown(object):
         
         self.avg = avgDown     # 上行消息间的时间间隔（泊松分布期望值）
         self.eventMsgGenTime = gen_possion_msg_sequence(self.avg, 
-                                            gl_totalRunTime - self.randStart - gl_nodesUpNum*gl_slotDuration)
+                                            gl_totalRunTime - self.randStart)
         
         self.msgList = []
         for t in self.eventMsgGenTime:
@@ -354,7 +355,7 @@ class NodeDown(object):
             assert isinstance(msg, DownMsg)
             if msg.txTime:
                 self.msgTx += 1
-                self.avgDelay += msg.txTime - msg.genTime + DURATION_DOWNLINK # 这里再加上空中传输时间
+                self.avgDelay += msg.txTime - msg.genTime
         
         if self.msgTx > 0:
             self.avgDelay /= self.msgTx
@@ -426,19 +427,16 @@ def GatewaySchedulerRunLPW():
             sum(msgNumList)/len(msgNumList),
             sum(txNumList)/len(txNumList))
     
-def GatewaySchedulerRun():
-    print(GatewaySchedulerRunTDMA())
-    print(GatewaySchedulerRunLPW())
-    
 if __name__ == '__main__':
     #####################################
     # 仿真的基本配置参数
     gl_slotDuration = 500   # ms
-    gl_maxUpPerSlot = 2     # 单个时间槽里可以捆绑发送的上行消息个数
+    gl_maxUpPerSlot = 1     # 单个时间槽里可以捆绑发送的上行消息个数
     
-    gl_longPreambleDuration = 500   # LPW长前导码的持续时间 (ms)
+    gl_longPreambleDuration = 800   # LPW长前导码的持续时间 (ms)
     
-    gl_downMsgLiveTime = 3600*1000  # 每个下行消息的存活时间，如果在这个时间内没有推送下去，就删除掉
+    gl_downMsgLiveTime = 900*1000   # 每个下行消息的存活时间，如果在这个时间内没有推送下去，就删除掉
+    gl_upMsgLiveTime   = 900*1000   # 每个上行消息的存活时间
     gl_downChannelNum = 8           # 将所有LPW节点查收长前导码的频段，划分为8个子频段，避免被频繁唤醒
 
     gl_nodeInitSpan = 600*1000  # 节点在仿真时间的前面这段时间内完成初始化
@@ -446,10 +444,81 @@ if __name__ == '__main__':
     gl_avgDown  = 600*1000
     gl_batteryCapacity = 2500   # mAh
     
-    gl_nodesUpNum   = 300   # 上行TDMA节点数量（被分配固定的时间槽用于数据交互）
-    gl_nodesDownNum = 500   # 下行LPW节点数量（不分配固定的时间槽）
+    gl_nodesUpNum   = None   # 上行TDMA节点数量（被分配固定的时间槽用于数据交互）
+    gl_nodesDownNum = None   # 下行LPW节点数量（不分配固定的时间槽）
     #####################################
     
-    GatewaySchedulerRun()
+    #####################################
+    # 仿真场景1 - 同TDMA比较 - 固定上行节点的数量，变动发送数据间隔的泊松分布期望值
+    S1 = True
+    
+    if S1:
+        gl_nodesUpNum = 300 # 按照 gl_slotDuration，最佳发送间隔是 gl_nodesUpNum*gl_slotDuration
+                            # i.e. 150
+        intervalList = [120, 130, 140, 150, 160, 170, 180, 190, 200, 250, 300, 350, 400, 450, 500, 550, 600] # s
+        
+        logger.info("S1 ============== TDMA ============== interval")
+        logger.info("%10s, %10s, %10s" % ('power', 'delay', 'ratio'))
+        for interval in intervalList:
+            gl_avgEvent = interval*1000
+            power, delay, num, tx = GatewaySchedulerRunTDMA()
+            logger.info("%10.2f, %10.2f, %10.4f" % (power, delay, tx/num))
+    #####################################
+    
+    #####################################
+    # 仿真场景2 - 同TDMA比较 - 固定发送数据间隔的泊松分布期望值，变动上行节点的数量
+    S2 = True
+    
+    if S2:
+        gl_avgEvent = 300*1000  # 按照 gl_slotDuration 的设定
+                                # 最佳节点数量是在 gl_avgEvent/gl_slotDuration，可以跑满带宽
+                                # i.e. 600
+        nodesNumList = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800]
+        
+        logger.info("S2 ============== TDMA ============== nodesNum")
+        logger.info("%10s, %10s, %10s" % ('power', 'delay', 'ratio'))
+        for nodesNum in nodesNumList:
+            gl_nodesUpNum = nodesNum
+            power, delay, num, tx = GatewaySchedulerRunTDMA()
+            logger.info("%10.2f, %10.2f, %10.4f" % (power, delay, tx/num))
+    #####################################
+    
+    #####################################
+    # 仿真场景3 - 同LPW比较 - 固定下行节点的数量，变动网关给各个节点生成下行数据间隔的泊松分布期望值
+    S3 = True
+    
+    if S3:
+        gl_nodesDownNum = 300   # 按照(gl_longPreambleDuration+200)ms的一个消息发送时间
+                                # 最佳间隔是在 gl_nodesDownNum*(gl_longPreambleDuration+200)ms 的位置上
+                                # i.e. 300
+        intervalList = [250, 275, 300, 325, 350, 375, 400, 
+                        500, 600, 700, 800, 900, 1000, 1100, 1200] # s
+        
+        logger.info("S3 ============== LPW ============== interval")
+        logger.info("%10s, %10s, %10s" % ('power', 'delay', 'ratio'))
+        for interval in intervalList:
+            gl_avgDown = interval*1000
+            power, delay, num, tx = GatewaySchedulerRunLPW()
+            logger.info("%10.2f, %10.2f, %10.4f" % (power, delay, tx/num))
+    #####################################
+    
+    
+    #####################################
+    # 仿真场景4 - 同LPW比较 - 固定网关给各个节点生成下行数据间隔的泊松分布期望值，变动下行节点的数量
+    S4 = True
+    
+    if S4:
+        gl_avgDown = 300*1000   # 按照(gl_longPreambleDuration+200)ms的一个消息发送时间
+                                # 最佳节点数量是@gl_avgDown/(gl_longPreambleDuration+200)个
+                                # i.e. 300
+        nodesNumList = [100, 150, 200, 250, 275, 300, 325, 350, 400, 450, 500]
+        
+        logger.info("S4 ============== LPW ============== nodesNum")
+        logger.info("%10s, %10s, %10s" % ('power', 'delay', 'ratio'))
+        for nodesNum in nodesNumList:
+            gl_nodesDownNum = nodesNum
+            power, delay, num, tx = GatewaySchedulerRunLPW()
+            logger.info("%10.2f, %10.2f, %10.4f" % (power, delay, tx/num))
+    #####################################
     
     
