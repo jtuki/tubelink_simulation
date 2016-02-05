@@ -304,7 +304,7 @@ class NodeDown(object):
         while k < 128:
             self.checkBcnSeqID.append(k)
             k += self.bcnDown
-        assert len(self.checkBcnSeqID) == int(128 / self.bcnDown) 
+        assert len(self.checkBcnSeqID) == int(128 / self.bcnDown)
         
         logger.debug(time_prefix() + "NodeDown inited: 0x%X, downMsgNum %d" %
                      (self.id, len(self.downMsgList)))
@@ -393,6 +393,7 @@ def GatewaySchedulerRun(check_variables):
             
             if len(down_msg) > gl_maxDownlinkMsg:
                 # 网关本信标周期的下行缓冲超过限值
+                # down_msg.sort(key=lambda x:x.genTime[0])
                 for i in range(gl_maxDownlinkMsg, len(down_msg)):
                     down_msg[i].tx_buf_full()
                     downNode = gl_nodeID_node_mapping[down_msg[i].nodeID]
@@ -763,7 +764,7 @@ if __name__ == '__main__':
     if S1:
         # 仿真场景1的配置参数 - 更改上行节点数量，验证对上行重传功耗开销、上行丢包率、上行延迟的影响
         gl_nodesUpNum   = None      # [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
-    
+        
         logger.info("=== S1 === gl_nodesUpNum")
         logger.info("%10s, %10s, %10s, %10s, %10s, %10s," %
                     ("ampUp", "ampDown", "upDelay", "upOk", "downDelay", "downOk"))
@@ -794,10 +795,10 @@ if __name__ == '__main__':
     #####################################
     
     #####################################
-    S3 = True
+    S3 = False
     if S3:
         # 仿真场景3的配置参数 - 更改bcnDown参数，验证对下行节点功耗开销、以及下行延迟的影响
-        gl_nodesDownNum = 500
+        gl_nodesDownNum = 300
         gl_bcnDown = None   # [4, 8, 16, 32, 64]
         
         logger.info("=== S3 === gl_bcnDown")
@@ -829,5 +830,108 @@ if __name__ == '__main__':
         # 还原默认值
         gl_nodeInitSpan = 600*1000  # 节点在仿真时间的前面这段时间内完成初始化
         gl_bcnClassesNum = 2        # 信标周期分组的数量
+    #####################################
+    
+    #####################################
+    TDMA_S1 = False
+    if TDMA_S1:
+        # 和 TDMA 进行比较，此时尽量降低下行段带来的影响
+        gl_nodesDownNum = 20
+        gl_avgDown = 900*1000
+        
+        gl_nodesUpNum = 300
+        intervalList = [120, 130, 140, 150, 160, 170, 180, 190, 200, 250, 300, 350, 400, 450, 500, 550, 600] # s
+        
+        logger.info("=== TubeLink vs. TDMA === interval")
+        logger.info("%10s, %10s, %10s, %10s, %10s, %10s," %
+                    ("ampUp", "ampDown", "upDelay", "upOk", "downDelay", "downOk"))
+        for interval in intervalList:
+            gl_avgEvent = interval * 1000
+            GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
+        
+        # 还原默认值    
+        gl_nodesDownNum = 300
+        gl_nodesUpNum = 300
+        gl_avgDown = 600*1000
+        gl_avgEvent = 300*1000
+    #####################################
+    
+    #####################################
+    TDMA_S2 = False
+    if TDMA_S2:
+        # 和 TDMA 进行比较，此时尽量降低下行段带来的影响
+        gl_nodesDownNum = 20
+        gl_avgDown = 900*1000
+        
+        gl_avgEvent = 300*1000
+        nodesNumList = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800]
+        
+        logger.info("=== TubeLink vs. TDMA === nodesNum")
+        logger.info("%10s, %10s, %10s, %10s, %10s, %10s," %
+                    ("ampUp", "ampDown", "upDelay", "upOk", "downDelay", "downOk"))
+        for num in nodesNumList:
+            gl_nodesUpNum = num
+            GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
+        
+        # 还原默认值
+        gl_nodesDownNum = 300
+        gl_nodesUpNum = 300
+        gl_avgDown = 600*1000
+        gl_avgEvent = 300*1000
+    #####################################
+    
+    #####################################
+    LPW_S1 = False
+    if LPW_S1:
+        # 同 LPW 进行比较，此时尽量降低上行段带来的影响。
+        # 需要指出的是，此处并没有修改下行消息数量 @gl_maxDownlinkMsg 的配置，依然为上行段保留了相当的空间。
+        gl_nodesUpNum = 100
+        gl_avgEvent = 300*1000
+        
+        gl_nodesDownNum = 300
+        gl_bcnDown = 8
+        intervalList = [250, 275, 300, 325, 350, 375, 400, 
+                        500, 600, 700, 800, 900, 1000, 1100, 1200] # s
+        
+        logger.info("=== TubeLink vs. LPW === interval")
+        logger.info("%10s, %10s, %10s, %10s, %10s, %10s," %
+                    ("ampUp", "ampDown", "upDelay", "upOk", "downDelay", "downOk"))
+        for interval in intervalList:
+            gl_avgDown = interval * 1000
+            GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
+        
+        # 还原默认值
+        gl_nodesDownNum = 300
+        gl_bcnDown = 32
+        gl_nodesUpNum = 300
+        gl_avgDown = 600*1000
+        gl_avgEvent = 300*1000        
+    #####################################
+    
+    #####################################
+    LPW_S2 = False
+    if LPW_S2:
+        # 同 LPW 进行比较，此时尽量降低上行段带来的影响。
+        # 需要指出的是，此处并没有修改下行消息数量 @gl_maxDownlinkMsg 的配置，依然为上行段保留了相当的空间。
+        gl_nodesUpNum = 100
+        gl_avgEvent = 300*1000
+        
+        gl_avgDown = 300*1000
+        gl_bcnDown = 8
+        nodesNumList = [100, 150, 200, 250, 275, 300, 325, 350, 400, 450, 500]
+        
+        logger.info("=== TubeLink vs. LPW === nodesNum")
+        logger.info("%10s, %10s, %10s, %10s, %10s, %10s," %
+                    ("ampUp", "ampDown", "upDelay", "upOk", "downDelay", "downOk"))
+        for num in nodesNumList:
+            gl_nodesDownNum = num
+            GatewaySchedulerRun(['power', 'upDelay', 'upOk', 'downDelay', 'downOk'])
+        
+        # 还原默认值
+        gl_nodesDownNum = 300
+        gl_bcnDown = 32
+        gl_nodesUpNum = 300
+        gl_avgDown = 600*1000
+        gl_avgEvent = 300*1000    
     #####################################
     
