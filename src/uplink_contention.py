@@ -4,12 +4,10 @@
 r"""针对上行竞争接入的FHSS策略做一些仿真。
 """
 
-numNodes = 10
-totalUplinkSlots = 100  # 所有竞争的时间槽数量
-uFrameSlots = 4         # 每个上行消息占据的时间槽数量
-uSubFrameSlots = 3      # 在 calc_ratio3 中，每个时间槽的前面部分再细分了 uSubFrameSlots 个子槽。
-
 from random import randint
+from simple_logger import get_logger
+
+logger = get_logger()
 
 def calc_ratio1():
     r"""随机选择时间槽，不按照 uFrameSlots 的倍数来选择起始时间槽位置。
@@ -88,11 +86,21 @@ def calc_ratio3():
     return (len(slotList), len(slotOk), slotList, slotOk, len(slotOk)*uFrameSlots / totalUplinkSlots)
     
 if __name__ == '__main__':
-    runTimes = 50000
-    k = 0
-    for i in range(runTimes):
-        r = calc_ratio3()
-        k += r[1]
-    k = k/runTimes
-    print(k)
+    runTimes = 5000
+    
+    numNodes = None
+    numNodesList = [n for n in range(101, 200)]
+    totalUplinkSlots = 100  # 所有竞争的时间槽数量
+    uFrameSlots = 4         # 每个上行消息占据的时间槽数量
+    uSubFrameSlots = 3      # 在 calc_ratio3 中，每个时间槽的前面部分再细分了 uSubFrameSlots 个子槽。
+
+    logger.info("numNodesList: %s" % numNodesList)
+    for num in numNodesList:
+        numNodes = num
+        k = 0
+        for i in range(runTimes):
+            r = calc_ratio3()
+            k += r[1]
+        k = k/runTimes
+        logger.info("%f, " % k)
     
